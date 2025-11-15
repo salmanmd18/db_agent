@@ -5,6 +5,10 @@ import { Card } from "@/components/ui/card";
 import { Mic, MicOff, Send, X, Minimize2, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import AppointmentForm from "./AppointmentForm";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import type { InsertAppointment } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
 
 interface Message {
   id: string;
@@ -34,6 +38,18 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
   const [showAppointmentForm, setShowAppointmentForm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const { toast } = useToast();
+
+  const appointmentMutation = useMutation({
+    mutationFn: async (data: InsertAppointment) => {
+      const res = await apiRequest("/api/appointments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -99,7 +115,7 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
         if (response.isSchedulingIntent) {
           setShowAppointmentForm(true);
         }
-      }, 1000);
+      }, 800);
     } catch (error) {
       setIsTyping(false);
       const errorMessage: Message = {
@@ -114,7 +130,11 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
 
   const handleVoiceToggle = () => {
     if (!recognitionRef.current) {
-      alert("Speech recognition is not supported in your browser.");
+      toast({
+        title: "Voice not supported",
+        description: "Speech recognition is not supported in your browser.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -131,6 +151,33 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  const handleAppointmentSubmit = async (data: InsertAppointment) => {
+    try {
+      await appointmentMutation.mutateAsync(data);
+      
+      setShowAppointmentForm(false);
+      const confirmMessage: Message = {
+        id: Date.now().toString(),
+        text: `Great! I've recorded your appointment request for ${data.serviceType} at our ${data.location} location on ${data.preferredDate}. Our team will contact you shortly to confirm.`,
+        isBot: true,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, confirmMessage]);
+      
+      toast({
+        title: "Appointment Request Submitted",
+        description: "Our team will contact you shortly to confirm.",
+      });
+    } catch (error) {
+      console.error("Appointment submission error:", error);
+      toast({
+        title: "Submission Failed",
+        description: "Please try again or call your nearest location.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -197,17 +244,7 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
         {showAppointmentForm ? (
           <div className="flex-1 overflow-y-auto p-4 bg-background">
             <AppointmentForm
-              onSubmit={(data) => {
-                console.log("Appointment submitted:", data);
-                setShowAppointmentForm(false);
-                const confirmMessage: Message = {
-                  id: Date.now().toString(),
-                  text: `Great! I've recorded your appointment request for ${data.serviceType} at our ${data.location} location. Our team will contact you shortly to confirm.`,
-                  isBot: true,
-                  timestamp: new Date(),
-                };
-                setMessages((prev) => [...prev, confirmMessage]);
-              }}
+              onSubmit={handleAppointmentSubmit}
               onCancel={() => setShowAppointmentForm(false)}
             />
           </div>

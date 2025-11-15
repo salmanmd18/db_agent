@@ -1,83 +1,31 @@
 import ChatWidget from "@/components/ChatWidget";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import type { ChatResponse } from "@shared/schema";
 
 export default function Home() {
-  const handleSendMessage = async (message: string) => {
-    const lowerMessage = message.toLowerCase();
-    
-    if (lowerMessage.includes("hour") || lowerMessage.includes("open")) {
-      return {
-        answer: "Most Dobbs locations are open Monday through Saturday, roughly 7AM to 6PM. Hours may vary by location. Would you like help scheduling an appointment?",
-        isSchedulingIntent: false,
-      };
-    }
-    
-    if (lowerMessage.includes("tire") && (lowerMessage.includes("brand") || lowerMessage.includes("carry"))) {
-      return {
-        answer: "Dobbs carries all major tire brands including Michelin, Goodyear, Bridgestone, Firestone, Continental, Pirelli, Cooper, BF Goodrich, and more. We also offer free tire inspections and a price-match guarantee!",
-        isSchedulingIntent: false,
-      };
-    }
-    
-    if (lowerMessage.includes("appointment") || lowerMessage.includes("schedule") || lowerMessage.includes("book")) {
-      return {
-        answer: "I'd be happy to help you schedule an appointment! Let me collect some information from you.",
-        isSchedulingIntent: true,
-      };
-    }
-    
-    if (lowerMessage.includes("location") || lowerMessage.includes("where")) {
-      return {
-        answer: "Dobbs has over 50 convenient locations throughout the St. Louis area including Ballwin, Chesterfield, Clayton, Fenton, and many more. Which area are you closest to?",
-        isSchedulingIntent: false,
-      };
-    }
-    
-    if (lowerMessage.includes("oil change") || lowerMessage.includes("oil")) {
-      return {
-        answer: "Dobbs offers professional oil change services using quality products. Prices vary by vehicle type and oil grade. Would you like to schedule an appointment for an oil change?",
-        isSchedulingIntent: false,
-      };
-    }
+  const chatMutation = useMutation({
+    mutationFn: async (message: string) => {
+      const res = await apiRequest("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      return res.json() as Promise<ChatResponse>;
+    },
+  });
 
-    if (lowerMessage.includes("brake")) {
+  const handleSendMessage = async (message: string): Promise<{ answer: string; isSchedulingIntent?: boolean }> => {
+    try {
+      const response = await chatMutation.mutateAsync(message);
+      return response;
+    } catch (error) {
+      console.error("Chat error:", error);
       return {
-        answer: "Dobbs provides expert brake service including inspection, pad replacement, rotor resurfacing, and complete brake system repairs. We use quality parts and our ASE-certified technicians ensure your safety. Would you like to schedule a brake inspection?",
+        answer: "I'm having trouble connecting right now. Please try again in a moment.",
         isSchedulingIntent: false,
       };
     }
-
-    if (lowerMessage.includes("alignment")) {
-      return {
-        answer: "We offer professional wheel alignment services to ensure proper tire wear and vehicle handling. Signs you may need an alignment include uneven tire wear or your vehicle pulling to one side. Would you like to schedule an alignment check?",
-        isSchedulingIntent: false,
-      };
-    }
-
-    if (lowerMessage.includes("battery")) {
-      return {
-        answer: "Dobbs provides battery testing and replacement services. We carry quality batteries for all vehicle types. If your car is slow to start or you're experiencing electrical issues, we can help. Would you like to schedule a battery check?",
-        isSchedulingIntent: false,
-      };
-    }
-
-    if (lowerMessage.includes("warranty") || lowerMessage.includes("guarantee")) {
-      return {
-        answer: "Dobbs offers a price-match guarantee on all tire purchases. We'll match any advertised sale price from a local store or dealer. We also provide warranties on our services and parts. What specific service are you interested in?",
-        isSchedulingIntent: false,
-      };
-    }
-
-    if (lowerMessage.includes("price") || lowerMessage.includes("cost")) {
-      return {
-        answer: "Prices vary depending on your vehicle type and specific service needs. We offer competitive pricing and a price-match guarantee on tires. For an accurate quote, I recommend scheduling an appointment or calling your nearest location. Would you like me to help you schedule an appointment?",
-        isSchedulingIntent: false,
-      };
-    }
-    
-    return {
-      answer: "Thanks for your question! Dobbs Tire & Auto Centers provides tires, brakes, alignments, oil changes, batteries, and general auto repair. We're family-operated since 1976 with over 50 locations in the St. Louis area. How can I help you today?",
-      isSchedulingIntent: false,
-    };
   };
 
   return (
