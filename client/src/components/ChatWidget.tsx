@@ -36,6 +36,7 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [showAppointmentForm, setShowAppointmentForm] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const { toast } = useToast();
@@ -60,11 +61,32 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
   }, [messages]);
 
   useEffect(() => {
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    // Check for secure context (HTTPS) and browser support
+    const isSecureContext = window.isSecureContext || window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+    const hasSpeechRecognition = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+    
+    if (!isSecureContext) {
+      console.warn('Voice input requires HTTPS or localhost');
+      setVoiceSupported(false);
+      return;
+    }
+
+    if (!hasSpeechRecognition) {
+      console.warn('Speech Recognition not supported in this browser');
+      setVoiceSupported(false);
+      return;
+    }
+
+    try {
       const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = false;
+      recognitionRef.current.lang = 'en-US';
+
+      recognitionRef.current.onstart = () => {
+        setIsRecording(true);
+      };
 
       recognitionRef.current.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
@@ -72,15 +94,37 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
         setIsRecording(false);
       };
 
-      recognitionRef.current.onerror = () => {
+      recognitionRef.current.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
         setIsRecording(false);
+        
+        let errorMessage = 'Voice input failed. Please try again.';
+        
+        if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+          errorMessage = 'Microphone access denied. Please enable microphone permissions in your browser settings.';
+        } else if (event.error === 'no-speech') {
+          errorMessage = 'No speech detected. Please try again.';
+        } else if (event.error === 'network') {
+          errorMessage = 'Network error. Please check your connection.';
+        }
+        
+        toast({
+          title: 'Voice Input Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
       };
 
       recognitionRef.current.onend = () => {
         setIsRecording(false);
       };
+
+      setVoiceSupported(true);
+    } catch (error) {
+      console.error('Failed to initialize speech recognition:', error);
+      setVoiceSupported(false);
     }
-  }, []);
+  }, [toast]);
 
   const handleSend = async () => {
     if (!inputValue.trim()) return;
@@ -128,22 +172,58 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
     }
   };
 
-  const handleVoiceToggle = () => {
-    if (!recognitionRef.current) {
+  const handleVoiceToggle = async () => {
+    if (!voiceSupported || !recognitionRef.current) {
+      const isSecureContext = window.isSecureContext || window.location.protocol === 'https:' || window.location.hostname === 'localhost';
+      
       toast({
-        title: "Voice not supported",
-        description: "Speech recognition is not supported in your browser.",
+        title: "Voice Input Unavailable",
+        description: isSecureContext 
+          ? "Speech recognition is not supported in your browser. Please use Chrome, Edge, or Safari."
+          : "Voice input requires HTTPS. This feature is not available on unsecured connections.",
         variant: "destructive",
       });
       return;
     }
 
     if (isRecording) {
-      recognitionRef.current.stop();
-      setIsRecording(false);
-    } else {
+      try {
+        recognitionRef.current.stop();
+      } catch (error) {
+        console.error('Error stopping recognition:', error);
+        setIsRecording(false);
+      }
+      return;
+    }
+
+    // Request microphone permission first
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+    } catch (error) {
+      console.error('Microphone permission error:', error);
+      toast({
+        title: "Microphone Access Denied",
+        description: "Please allow microphone access to use voice input. Check your browser settings.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Start speech recognition
+    try {
       recognitionRef.current.start();
-      setIsRecording(true);
+      // isRecording will be set to true by onstart event
+    } catch (error) {
+      console.error('Error starting recognition:', error);
+      setIsRecording(false);
+      
+      toast({
+        title: "Voice Input Failed",
+        description: "Could not start voice recognition. Please try typing instead.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -319,8 +399,10 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
                   size="icon"
                   variant={isRecording ? "destructive" : "secondary"}
                   onClick={handleVoiceToggle}
+                  disabled={!voiceSupported}
                   data-testid="button-voice"
                   aria-label={isRecording ? "Stop recording" : "Start voice input"}
+                  title={!voiceSupported ? "Voice input not available in this browser or connection" : undefined}
                 >
                   {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </Button>

@@ -6,7 +6,7 @@ A production-ready AI-powered customer service chatbot for Dobbs Tire & Auto Cen
 
 - **Intelligent FAQ System**: Instant answers about hours, locations, tire brands, services, pricing, and warranties
 - **AI-Powered Responses**: Groq LLM integration with HuggingFace fallback for natural conversations
-- **Voice Input**: Web Speech API support for hands-free interaction
+- **Voice Input**: Web Speech API support for hands-free interaction (requires HTTPS and Chrome/Edge/Safari)
 - **Appointment Lead Capture**: Intelligent form triggered by scheduling intent detection
 - **Mobile Responsive**: Full-screen on mobile, floating widget on desktop
 - **Lead Storage**: All appointment requests saved to `/leads/appointments.json`
@@ -63,8 +63,22 @@ The app will be available at `http://localhost:5000`
    - Tire brands and services
    - Pricing and warranties
    - Appointment scheduling
-3. Use the microphone button for voice input (browser support required)
+3. Use the microphone button for voice input (see Voice Input Requirements below)
 4. Type "schedule an appointment" to trigger the lead capture form
+
+### Voice Input Requirements
+
+Voice input is available when **all** of these conditions are met:
+
+- **Secure Connection**: HTTPS (or localhost for development)
+- **Supported Browser**: Chrome, Edge, or Safari (Web Speech API required)
+- **Microphone Permission**: Browser must have permission to access the microphone
+
+**Note**: The microphone button will be disabled if voice input is not supported. If you click it and get an error:
+- Check that you're using HTTPS (not HTTP)
+- Ensure you're using a supported browser
+- Allow microphone access when prompted
+- Check browser microphone permissions in settings
 
 ## API Endpoints
 
