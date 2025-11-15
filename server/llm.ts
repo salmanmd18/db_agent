@@ -32,9 +32,14 @@ export async function getLLMResponse(userMessage: string): Promise<LLMResponse> 
 
   if (!groqApiKey) {
     // Fallback to a generic response when no API key is available
+    const isSchedulingIntent = 
+      userMessage.toLowerCase().includes("appointment") ||
+      userMessage.toLowerCase().includes("schedule") ||
+      userMessage.toLowerCase().includes("book");
+    
     return {
       answer: "Thanks for your question! Dobbs Tire & Auto Centers provides tires, brakes, alignments, oil changes, batteries, and general auto repair. We're family-operated since 1976 with over 50 locations in the St. Louis area. For specific information, I'd be happy to help you schedule an appointment with one of our locations. Would you like to do that?",
-      isSchedulingIntent: false,
+      isSchedulingIntent,
     };
   }
 

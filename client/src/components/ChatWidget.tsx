@@ -173,6 +173,16 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
       });
     } catch (error) {
       console.error("Appointment submission error:", error);
+      
+      // Show error message in chat as well as toast
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        text: "I'm sorry, there was an error submitting your appointment request. Please try again or call your nearest Dobbs location directly.",
+        isBot: true,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+      
       toast({
         title: "Submission Failed",
         description: "Please try again or call your nearest location.",
