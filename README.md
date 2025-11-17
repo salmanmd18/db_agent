@@ -1,11 +1,11 @@
 # Dobbs AI Service Assistant
 
-A production-ready AI-powered customer service chatbot for Dobbs Tire & Auto Centers, built with React, Express, and free-tier AI models.
+A production-ready AI-powered customer service chatbot for Dobbs Tire & Auto Centers, now powered by React on the frontend and a FastAPI backend written in Python with integrated ElevenLabs text-to-speech (TTS).
 
 ## Features
 
 - **Intelligent FAQ System**: Instant answers about hours, locations, tire brands, services, pricing, and warranties
-- **AI-Powered Responses**: Groq LLM integration with HuggingFace fallback for natural conversations
+- **AI + Voice Agent**: Deterministic AI replies with optional ElevenLabs-powered speech playback
 - **Voice Input**: Web Speech API support for hands-free interaction (requires HTTPS and Chrome/Edge/Safari)
 - **Appointment Lead Capture**: Intelligent form triggered by scheduling intent detection
 - **Mobile Responsive**: Full-screen on mobile, floating widget on desktop
@@ -21,39 +21,49 @@ A production-ready AI-powered customer service chatbot for Dobbs Tire & Auto Cen
 - Wouter for routing
 
 ### Backend
-- Express.js + TypeScript
-- Groq SDK (free tier: llama-3.1-8b-instant)
-- Keyword-based FAQ search with semantic matching
-- JSON file storage for leads
+- FastAPI (Python 3.10 via `uv`) serving REST endpoints
+- ElevenLabs TTS REST API for natural speech playback
+- Keyword-based FAQ search with scheduling intent detection
+- JSON file storage for leads (same format as the previous Node server)
 
 ## Setup Instructions
 
-### 1. Install Dependencies
+### 1. Install JavaScript dependencies
 ```bash
 npm install
 ```
 
-### 2. Environment Variables (Optional)
-
-For enhanced AI responses, add these optional API keys to your environment:
-
+### 2. Install Python dependencies
+Create/activate the `.venv` with `uv venv .venv` (already available), then:
 ```bash
-# Optional: For enhanced LLM responses (free tier available)
-GROQ_API_KEY=your_groq_api_key_here
-
-# Optional: For HuggingFace fallback
-HUGGINGFACE_TOKEN=your_hf_token_here
+uv pip install -r requirements.txt
 ```
 
-**Note**: The chatbot works without API keys using the built-in FAQ database and fallback responses.
+### 3. Environment Variables
+Copy `.env.example` to `.env` (or export the variables in your shell) and set the following:
 
-### 3. Run the Application
+```bash
+# Frontend origin allowed to call the API (optional)
+APP_ORIGIN=http://localhost:5173
 
+# ElevenLabs TTS credentials
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+ELEVENLABS_VOICE_ID=YOUR_DEFAULT_VOICE_ID_HERE
+```
+
+The assistant responds with FAQ answers and a deterministic fallback even without the ElevenLabs API key, but the `/tts` endpoint will be disabled.
+
+### 4. Run the Application in Development
 ```bash
 npm run dev
 ```
+This launches Vite on `http://localhost:5173` and FastAPI on `http://localhost:5000` simultaneously using `concurrently`.
 
-The app will be available at `http://localhost:5000`
+### 5. Production Build
+```bash
+npm run build   # produces dist/public
+npm start       # serves the built client + API on port 5000
+```
 
 ## Usage
 
@@ -63,8 +73,9 @@ The app will be available at `http://localhost:5000`
    - Tire brands and services
    - Pricing and warranties
    - Appointment scheduling
-3. Use the microphone button for voice input (see Voice Input Requirements below)
-4. Type "schedule an appointment" to trigger the lead capture form
+3. Use the microphone button for voice input (see requirements below)
+4. Toggle the new "Voice Reply" control in the chat widget to receive spoken replies (requires ElevenLabs API key)
+5. Type "schedule an appointment" to trigger the lead capture form
 
 ### Voice Input Requirements
 
@@ -74,36 +85,22 @@ Voice input is available when **all** of these conditions are met:
 - **Supported Browser**: Chrome, Edge, or Safari (Web Speech API required)
 - **Microphone Permission**: Browser must have permission to access the microphone
 
-**Note**: The microphone button will be disabled if voice input is not supported. If you click it and get an error:
-- Check that you're using HTTPS (not HTTP)
-- Ensure you're using a supported browser
-- Allow microphone access when prompted
-- Check browser microphone permissions in settings
+**Server Voice Agent**: To hear spoken answers, set `ELEVENLABS_API_KEY` and enable the voice reply toggle. The backend streams ElevenLabs MP3 audio back to the browser via `/tts`.
 
 ## API Endpoints
 
 ### POST `/api/chat`
 Send a user message and receive an AI response.
 
-**Request:**
 ```json
 {
   "message": "What are your hours?"
 }
 ```
 
-**Response:**
-```json
-{
-  "answer": "Most Dobbs locations are open Monday through Saturday...",
-  "isSchedulingIntent": false
-}
-```
-
 ### POST `/api/appointments`
 Create an appointment lead.
 
-**Request:**
 ```json
 {
   "name": "John Doe",
@@ -116,6 +113,12 @@ Create an appointment lead.
 
 ### GET `/api/appointments`
 Retrieve all appointment leads.
+
+### GET `/api/appointments/{id}`
+Retrieve a single appointment record.
+
+### POST `/tts`
+Send `{ "text": "Your message", "voice_id": "optional_voice_override" }` and receive an MP3 audio stream suitable for playback.
 
 ## FAQ Knowledge Base
 
@@ -133,14 +136,14 @@ The chatbot includes 15+ pre-configured FAQ topics covering:
 
 ### Adding New FAQ Entries
 
-Edit `server/faq.ts` and add to the `FAQ_DATABASE` array:
+Edit `backend/faq.py` and add to the `FAQ_DATABASE` list:
 
-```typescript
-{
-  question: "Your question here?",
-  answer: "Your answer here.",
-  keywords: ["keyword1", "keyword2", "keyword3"],
-}
+```python
+FAQItem(
+  question="Your question here?",
+  answer="Your answer here.",
+  keywords=["keyword1", "keyword2", "keyword3"],
+)
 ```
 
 ### Changing Appointment Form Fields
@@ -154,39 +157,33 @@ const SERVICE_TYPES = ["Service1", "Service2", ...];
 
 ## Deployment
 
-### Replit Deployment
-
-This app is configured for Replit deployment:
-
-1. The workflow "Start application" runs `npm run dev`
-2. Server binds to `0.0.0.0:5000`
-3. All static assets served by Vite
+1. `npm run build`
+2. Ensure environment variables are configured on the host
+3. `npm start` to run FastAPI (Uvicorn) on port 5000 serving both the API and the built client
 
 ### Production Considerations
 
-- **API Keys**: Set `GROQ_API_KEY` as a Replit secret for enhanced responses
-- **Lead Storage**: Consider migrating from JSON file to a database for production scale
+- **API Keys**: Set `ELEVENLABS_API_KEY` (and optional `ELEVENLABS_VOICE_ID`) as secrets for the voice agent
+- **Lead Storage**: Consider migrating from JSON to a database for production scale
 - **Rate Limiting**: Add rate limiting middleware for the `/api/chat` endpoint
-- **CORS**: Configure CORS for embedding on the Dobbs website
+- **CORS**: Configure `APP_ORIGIN` when embedding the widget on another domain
 
 ## Embedding on External Website
 
-To embed this chatbot on the Dobbs website:
-
 ```html
 <iframe 
-  src="https://your-replit-url.replit.app" 
+  src="https://your-deployment-url"
   style="position: fixed; bottom: 0; right: 0; width: 380px; height: 600px; border: none; z-index: 9999;"
   title="Dobbs AI Assistant"
 ></iframe>
 ```
 
-Or use JavaScript to load it dynamically:
+Or dynamically load the widget script:
 
 ```html
 <script>
   const script = document.createElement('script');
-  script.src = 'https://your-replit-url.replit.app/embed.js';
+  script.src = 'https://your-deployment-url/embed.js';
   document.body.appendChild(script);
 </script>
 ```

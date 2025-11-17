@@ -2,7 +2,17 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Mic, MicOff, Send, X, Minimize2, MessageCircle } from "lucide-react";
+import {
+  Mic,
+  MicOff,
+  Send,
+  X,
+  Minimize2,
+  MessageCircle,
+  Volume2,
+  VolumeX,
+  Loader2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import AppointmentForm from "./AppointmentForm";
 import { useMutation } from "@tanstack/react-query";
@@ -37,9 +47,22 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
   const [isTyping, setIsTyping] = useState(false);
   const [showAppointmentForm, setShowAppointmentForm] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
+  const [voiceReplyEnabled, setVoiceReplyEnabled] = useState(false);
+  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
   const { toast } = useToast();
+  const handleOpen = () => {
+    setIsMinimized(false);
+    setIsOpen(true);
+  };
+
+  const handleClose = () => {
+    setIsOpen(false);
+    setIsMinimized(false);
+  };
 
   const appointmentMutation = useMutation({
     mutationFn: async (data: InsertAppointment) => {
@@ -126,6 +149,16 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
     }
   }, [toast]);
 
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
+      }
+    };
+  }, []);
+
   const handleSend = async () => {
     if (!inputValue.trim()) return;
 
@@ -139,6 +172,7 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
     setMessages((prev) => [...prev, userMessage]);
     setInputValue("");
     setIsTyping(true);
+    const shouldSpeakReply = voiceReplyEnabled;
 
     try {
       const response = onSendMessage 
@@ -159,6 +193,10 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
         if (response.isSchedulingIntent) {
           setShowAppointmentForm(true);
         }
+
+        if (shouldSpeakReply) {
+          void speakResponse(botMessage.text);
+        }
       }, 800);
     } catch (error) {
       setIsTyping(false);
@@ -169,6 +207,54 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
+    }
+  };
+
+  const speakResponse = async (text: string) => {
+    setIsGeneratingVoice(true);
+    try {
+      const res = await fetch("/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!res.ok) {
+        const message = (await res.text()) || res.statusText;
+        throw new Error(message);
+      }
+
+      const buffer = await res.arrayBuffer();
+      const blob = new Blob([buffer], { type: "audio/mpeg" });
+      const objectUrl = URL.createObjectURL(blob);
+
+      audioRef.current?.pause();
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+      }
+      audioUrlRef.current = objectUrl;
+
+      audioRef.current = new Audio(objectUrl);
+      audioRef.current.onended = () => {
+        if (audioUrlRef.current) {
+          URL.revokeObjectURL(audioUrlRef.current);
+          audioUrlRef.current = null;
+        }
+      };
+      await audioRef.current.play();
+    } catch (error) {
+      console.error("Voice agent error:", error);
+      setVoiceReplyEnabled(false);
+      toast({
+        title: "Voice agent unavailable",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Unable to synthesize speech. Check your ElevenLabs API key.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingVoice(false);
     }
   };
 
@@ -271,155 +357,151 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
     }
   };
 
-  if (!isOpen) {
-    return (
-      <button
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-4 right-4 md:bottom-6 md:right-6 w-14 h-14 md:w-16 md:h-16 bg-primary rounded-full shadow-2xl flex items-center justify-center hover-elevate active-elevate-2 z-50 animate-pulse"
-        data-testid="button-open-chat"
-        aria-label="Open chat"
-      >
-        <MessageCircle className="w-7 h-7 md:w-8 md:h-8 text-primary-foreground" />
-      </button>
-    );
-  }
-
   return (
-    <div
-      className={cn(
-        "fixed z-50 transition-all duration-300",
-        isMinimized 
-          ? "bottom-4 right-4 md:bottom-6 md:right-6" 
-          : "bottom-0 right-0 md:bottom-4 md:right-4 md:rounded-2xl w-full h-full md:w-[380px] md:h-[600px]"
-      )}
-    >
-      <Card className={cn(
-        "flex flex-col shadow-2xl overflow-hidden h-full",
-        isMinimized && "hidden"
-      )}>
-        <div className="bg-primary h-16 flex items-center justify-between px-4 flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 bg-green-400 rounded-full" />
-            <div>
-              <h3 className="text-primary-foreground font-semibold text-base" data-testid="text-chat-title">
-                Dobbs Assistant
-              </h3>
-              <p className="text-primary-foreground/80 text-xs">Online</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="text-primary-foreground hover:bg-primary-foreground/10 h-8 w-8"
-              onClick={() => setIsMinimized(true)}
-              data-testid="button-minimize-chat"
-              aria-label="Minimize chat"
-            >
-              <Minimize2 className="w-4 h-4" />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="text-primary-foreground hover:bg-primary-foreground/10 h-8 w-8"
-              onClick={() => setIsOpen(false)}
-              data-testid="button-close-chat"
-              aria-label="Close chat"
-            >
-              <X className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-
-        {showAppointmentForm ? (
-          <div className="flex-1 overflow-y-auto p-4 bg-background">
-            <AppointmentForm
-              onSubmit={handleAppointmentSubmit}
-              onCancel={() => setShowAppointmentForm(false)}
-            />
-          </div>
-        ) : (
-          <>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-background">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={cn(
-                    "flex",
-                    message.isBot ? "justify-start" : "justify-end"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "max-w-[80%] rounded-2xl px-4 py-3 text-sm",
-                      message.isBot
-                        ? "bg-muted text-foreground rounded-bl-none"
-                        : "bg-primary text-primary-foreground rounded-br-none"
-                    )}
-                    data-testid={`message-${message.id}`}
-                  >
-                    {message.text}
-                  </div>
-                </div>
-              ))}
-
-              {isTyping && (
-                <div className="flex justify-start">
-                  <div className="bg-muted rounded-2xl rounded-bl-none px-4 py-3">
-                    <div className="flex gap-1">
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                      <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            <div className="border-t bg-background p-3 flex-shrink-0">
-              {isRecording && (
-                <div className="mb-2 text-sm text-muted-foreground flex items-center gap-2">
-                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
-                  Listening...
-                </div>
-              )}
-              <div className="flex gap-2">
-                <Input
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Type your message..."
-                  className="flex-1"
-                  data-testid="input-chat-message"
-                  aria-label="Chat message input"
-                />
-                <Button
-                  size="icon"
-                  variant={isRecording ? "destructive" : "secondary"}
-                  onClick={handleVoiceToggle}
-                  disabled={!voiceSupported}
-                  data-testid="button-voice"
-                  aria-label={isRecording ? "Stop recording" : "Start voice input"}
-                  title={!voiceSupported ? "Voice input not available in this browser or connection" : undefined}
-                >
-                  {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                </Button>
-                <Button
-                  size="icon"
-                  onClick={handleSend}
-                  disabled={!inputValue.trim()}
-                  data-testid="button-send-message"
-                  aria-label="Send message"
-                >
-                  <Send className="w-4 h-4" />
-                </Button>
+    <div className="fixed bottom-0 right-0 md:bottom-6 md:right-6 z-50 flex flex-col items-end gap-3">
+      {isOpen && !isMinimized && (
+        <Card className="chat-widget-panel flex flex-col shadow-2xl overflow-hidden border border-border/70 w-screen h-screen rounded-none md:w-[380px] md:h-[600px] md:rounded-3xl">
+          <div className="bg-primary h-16 flex items-center justify-between px-4 flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 bg-green-400 rounded-full" />
+              <div>
+                <h3 className="text-primary-foreground font-semibold text-base" data-testid="text-chat-title">
+                  Dobbs Assistant
+                </h3>
+                <p className="text-primary-foreground/80 text-xs">Online</p>
               </div>
             </div>
-          </>
-        )}
-      </Card>
+            <div className="flex items-center gap-2">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="text-primary-foreground hover:bg-primary-foreground/10 h-8 w-8"
+                onClick={() => setIsMinimized(true)}
+                data-testid="button-minimize-chat"
+                aria-label="Minimize chat"
+              >
+                <Minimize2 className="w-4 h-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="text-primary-foreground hover:bg-primary-foreground/10 h-8 w-8"
+                onClick={handleClose}
+                data-testid="button-close-chat"
+                aria-label="Close chat"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+
+          {showAppointmentForm ? (
+            <div className="flex-1 overflow-y-auto p-4 bg-background">
+              <AppointmentForm
+                onSubmit={handleAppointmentSubmit}
+                onCancel={() => setShowAppointmentForm(false)}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-background">
+                {messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={cn(
+                      "flex",
+                      message.isBot ? "justify-start" : "justify-end"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "max-w-[80%] rounded-2xl px-4 py-3 text-sm",
+                        message.isBot
+                          ? "bg-muted text-foreground rounded-bl-none"
+                          : "bg-primary text-primary-foreground rounded-br-none"
+                      )}
+                      data-testid={`message-${message.id}`}
+                    >
+                      {message.text}
+                    </div>
+                  </div>
+                ))}
+
+                {isTyping && (
+                  <div className="flex justify-start">
+                    <div className="bg-muted rounded-2xl rounded-bl-none px-4 py-3">
+                      <div className="flex gap-1">
+                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div ref={messagesEndRef} />
+              </div>
+
+              <div className="border-t bg-background p-3 flex-shrink-0">
+                {isRecording && (
+                  <div className="mb-2 text-sm text-muted-foreground flex items-center gap-2">
+                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
+                    Listening...
+                  </div>
+                )}
+                {isGeneratingVoice && (
+                  <div className="mb-2 text-xs text-muted-foreground flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Preparing voice reply...
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Type your message..."
+                    className="flex-1"
+                    data-testid="input-chat-message"
+                    aria-label="Chat message input"
+                  />
+                  <Button
+                    size="icon"
+                    variant={voiceReplyEnabled ? "default" : "outline"}
+                    onClick={() => setVoiceReplyEnabled((prev) => !prev)}
+                    data-testid="button-voice-agent"
+                    aria-pressed={voiceReplyEnabled}
+                    aria-label={voiceReplyEnabled ? "Disable voice replies" : "Enable voice replies"}
+                  title="Let the assistant speak answers (requires ElevenLabs API key)"
+                  >
+                    {voiceReplyEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant={isRecording ? "destructive" : "secondary"}
+                    onClick={handleVoiceToggle}
+                    disabled={!voiceSupported}
+                    data-testid="button-voice"
+                    aria-label={isRecording ? "Stop recording" : "Start voice input"}
+                    title={!voiceSupported ? "Voice input not available in this browser or connection" : undefined}
+                  >
+                    {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  </Button>
+                  <Button
+                    size="icon"
+                    onClick={handleSend}
+                    disabled={!inputValue.trim()}
+                    data-testid="button-send-message"
+                    aria-label="Send message"
+                  >
+                    <Send className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </Card>
+      )}
 
       {isMinimized && (
         <Button
@@ -430,6 +512,17 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
         >
           <MessageCircle className="w-7 h-7 md:w-8 md:h-8" />
         </Button>
+      )}
+
+      {!isOpen && (
+        <button
+          onClick={handleOpen}
+          className="w-16 h-16 md:w-16 md:h-16 rounded-full shadow-2xl bg-primary text-primary-foreground flex items-center justify-center hover:scale-105 transition"
+          data-testid="button-open-chat"
+          aria-label="Open chat"
+        >
+          <MessageCircle className="w-7 h-7 md:w-8 md:h-8" />
+        </button>
       )}
     </div>
   );

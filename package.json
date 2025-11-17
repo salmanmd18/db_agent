@@ -4,9 +4,11 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development tsx server/index.ts",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
-    "start": "NODE_ENV=production node dist/index.js",
+    "dev": "concurrently \"npm run client\" \"npm run api\"",
+    "client": "vite --host 0.0.0.0 --port 5173",
+    "api": "python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 5000",
+    "build": "vite build",
+    "start": "python -m uvicorn backend.main:app --host 0.0.0.0 --port 5000",
     "check": "tsc",
     "db:push": "drizzle-kit push"
   },
@@ -92,6 +94,7 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
     "@types/ws": "^8.5.13",
+    "concurrently": "^9.1.0",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.4",
