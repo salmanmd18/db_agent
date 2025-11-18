@@ -202,6 +202,4 @@ The application includes comprehensive end-to-end testing covering:
 
 For questions about the Dobbs AI Service Assistant, contact the development team.
 
-## License
 
-Proprietary - Dobbs Tire & Auto Centers
