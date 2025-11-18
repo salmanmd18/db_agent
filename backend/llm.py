@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .faq import detect_scheduling_intent
-from .models import ChatResponse
+from .models.chat import ChatResponse
 
 FALLBACK_ANSWER = (
     "Thanks for reaching out! Dobbs Tire & Auto Centers handles tires, brakes, alignments, "
@@ -12,7 +12,9 @@ FALLBACK_ANSWER = (
 
 
 async def generate_llm_response(message: str) -> ChatResponse:
+    should_schedule = detect_scheduling_intent(message)
     return ChatResponse(
+        text=FALLBACK_ANSWER,
         answer=FALLBACK_ANSWER,
-        isSchedulingIntent=detect_scheduling_intent(message),
+        isSchedulingIntent=should_schedule,
     )

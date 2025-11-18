@@ -7,12 +7,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .models import Appointment, InsertAppointment
+from .models.appointments import (
+    LegacyAppointmentCreate as InsertAppointment,
+    LegacyAppointmentResponse as Appointment,
+)
 
 
 class AppointmentStorage:
     """
-    Lightweight persistence layer that mirrors the previous TypeScript MemStorage.
+    Legacy JSON-file storage kept for backwards compatibility with older tooling.
 
     Appointments are cached in memory for fast responses and written to
     `leads/appointments.json` so existing tooling continues to work.
@@ -75,4 +78,3 @@ class AppointmentStorage:
 
     async def get_one(self, appointment_id: str) -> Optional[Appointment]:
         return self._appointments.get(appointment_id)
-

@@ -13,6 +13,7 @@ class Settings:
     """Centralized environment configuration for the Dobbs backend."""
 
     app_origin: str
+    database_url: str
     elevenlabs_api_key: str | None
     elevenlabs_default_voice_id: str
 
@@ -32,9 +33,9 @@ class Settings:
 def get_settings() -> Settings:
     return Settings(
         app_origin=os.getenv("APP_ORIGIN", "http://localhost:5173"),
+        database_url=os.getenv("DATABASE_URL", "sqlite:///./data/app.db"),
         elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY"),
         elevenlabs_default_voice_id=os.getenv(
             "ELEVENLABS_VOICE_ID", DEFAULT_ELEVEN_VOICE_ID
         ),
     )
-

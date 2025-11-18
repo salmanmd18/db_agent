@@ -1,7 +1,4 @@
 import ChatWidget from "@/components/ChatWidget";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
-import type { ChatResponse } from "@shared/schema";
 import { Bot, CalendarCheck, Mic, Smartphone } from "lucide-react";
 
 const demoFeatures = [
@@ -28,30 +25,6 @@ const demoFeatures = [
 ];
 
 export default function Home() {
-  const chatMutation = useMutation({
-    mutationFn: async (message: string) => {
-      const res = await apiRequest("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-      });
-      return res.json() as Promise<ChatResponse>;
-    },
-  });
-
-  const handleSendMessage = async (message: string): Promise<{ answer: string; isSchedulingIntent?: boolean }> => {
-    try {
-      const response = await chatMutation.mutateAsync(message);
-      return response;
-    } catch (error) {
-      console.error("Chat error:", error);
-      return {
-        answer: "I'm having trouble connecting right now. Please try again in a moment.",
-        isSchedulingIntent: false,
-      };
-    }
-  };
-
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-16">
@@ -111,7 +84,7 @@ export default function Home() {
         </div>
       </div>
 
-      <ChatWidget onSendMessage={handleSendMessage} />
+      <ChatWidget />
     </div>
   );
 }

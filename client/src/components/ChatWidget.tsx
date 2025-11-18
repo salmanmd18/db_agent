@@ -1,47 +1,45 @@
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import {
+  Loader2,
+  MessageCircle,
   Mic,
   MicOff,
-  Send,
-  X,
   Minimize2,
-  MessageCircle,
+  Send,
   Volume2,
   VolumeX,
-  Loader2,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import AppointmentForm from "./AppointmentForm";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
-import type { InsertAppointment } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
+import AppointmentForm from "./AppointmentForm";
+import { useChat } from "@/hooks/useChat";
+import { fetchTtsAudio } from "@/lib/api";
+import { playAudioFromArrayBuffer } from "@/lib/audio";
+import type { Appointment, ChatResponse } from "@/types/api";
 
-interface Message {
+type Message = {
   id: string;
+  from: "user" | "assistant";
   text: string;
-  isBot: boolean;
   timestamp: Date;
-}
+  intent?: string | null;
+};
 
-interface ChatWidgetProps {
-  onSendMessage?: (message: string) => Promise<{ answer: string; isSchedulingIntent?: boolean }>;
-}
+const INITIAL_ASSISTANT_MESSAGE: Message = {
+  id: "welcome",
+  from: "assistant",
+  text: "Hi! I'm the Dobbs AI Assistant. How can I help you today? I can answer questions about our services, hours, locations, or help you schedule an appointment.",
+  timestamp: new Date(),
+};
 
-export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
+export default function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      text: "Hi! I'm the Dobbs AI Assistant. How can I help you today? I can answer questions about our services, hours, locations, or help you schedule an appointment.",
-      isBot: true,
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([INITIAL_ASSISTANT_MESSAGE]);
   const [inputValue, setInputValue] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -49,309 +47,174 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [voiceReplyEnabled, setVoiceReplyEnabled] = useState(false);
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  const handleOpen = () => {
-    setIsMinimized(false);
-    setIsOpen(true);
-  };
+  const { sendMessage, isLoading: isChatLoading } = useChat();
 
-  const handleClose = () => {
-    setIsOpen(false);
-    setIsMinimized(false);
-  };
-
-  const appointmentMutation = useMutation({
-    mutationFn: async (data: InsertAppointment) => {
-      const res = await apiRequest("/api/appointments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      return res.json();
-    },
-  });
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const addMessage = (entry: Message) =>
+    setMessages((prev) => [...prev, { ...entry, timestamp: new Date() }]);
 
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
-    // Check for secure context (HTTPS) and browser support
-    const isSecureContext = window.isSecureContext || window.location.protocol === 'https:' || window.location.hostname === 'localhost';
-    const hasSpeechRecognition = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
-    
-    if (!isSecureContext) {
-      console.warn('Voice input requires HTTPS or localhost');
+    const isSecureContext =
+      window.isSecureContext ||
+      window.location.protocol === "https:" ||
+      window.location.hostname === "localhost";
+    const hasSpeechRecognition =
+      "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
+
+    if (!isSecureContext || !hasSpeechRecognition) {
       setVoiceSupported(false);
       return;
     }
 
-    if (!hasSpeechRecognition) {
-      console.warn('Speech Recognition not supported in this browser');
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    if (!SpeechRecognition) {
       setVoiceSupported(false);
       return;
     }
 
-    try {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = 'en-US';
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
 
-      recognitionRef.current.onstart = () => {
-        setIsRecording(true);
-      };
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onend = () => setIsRecording(false);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setInputValue(transcript);
+      setIsRecording(false);
+    };
+    recognition.onerror = () => setIsRecording(false);
 
-      recognitionRef.current.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setInputValue(transcript);
-        setIsRecording(false);
-      };
+    recognitionRef.current = recognition;
+    setVoiceSupported(true);
 
-      recognitionRef.current.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        setIsRecording(false);
-        
-        let errorMessage = 'Voice input failed. Please try again.';
-        
-        if (event.error === 'not-allowed' || event.error === 'permission-denied') {
-          errorMessage = 'Microphone access denied. Please enable microphone permissions in your browser settings.';
-        } else if (event.error === 'no-speech') {
-          errorMessage = 'No speech detected. Please try again.';
-        } else if (event.error === 'network') {
-          errorMessage = 'Network error. Please check your connection.';
-        }
-        
-        toast({
-          title: 'Voice Input Error',
-          description: errorMessage,
-          variant: 'destructive',
-        });
-      };
-
-      recognitionRef.current.onend = () => {
-        setIsRecording(false);
-      };
-
-      setVoiceSupported(true);
-    } catch (error) {
-      console.error('Failed to initialize speech recognition:', error);
-      setVoiceSupported(false);
-    }
-  }, [toast]);
-
-  useEffect(() => {
     return () => {
-      audioRef.current?.pause();
-      if (audioUrlRef.current) {
-        URL.revokeObjectURL(audioUrlRef.current);
-        audioUrlRef.current = null;
-      }
+      recognition.stop();
     };
   }, []);
 
-  const handleSend = async () => {
-    if (!inputValue.trim()) return;
+  const handleChatResponse = async (response: ChatResponse) => {
+    const assistantText =
+      response.text ?? response.answer ?? "Thanks for reaching out! How else can I assist you?";
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      text: inputValue,
-      isBot: false,
+    addMessage({
+      id: crypto.randomUUID(),
+      from: "assistant",
+      text: assistantText,
+      intent: response.intent ?? (response.isSchedulingIntent ? "schedule" : null),
       timestamp: new Date(),
-    };
+    });
 
-    setMessages((prev) => [...prev, userMessage]);
+    if (response.isSchedulingIntent || response.intent === "schedule") {
+      setShowAppointmentForm(true);
+    }
+
+    if (voiceReplyEnabled && response.should_speak !== false) {
+      setIsGeneratingVoice(true);
+      try {
+        const buffer = await fetchTtsAudio({ text: assistantText });
+        await playAudioFromArrayBuffer(buffer);
+      } catch (error) {
+        console.error("Voice agent error:", error);
+        toast({
+          title: "Voice agent unavailable",
+          description: "Unable to synthesize speech. Audio playback was skipped.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsGeneratingVoice(false);
+      }
+    }
+  };
+
+  const handleSend = async () => {
+    const text = inputValue.trim();
+    if (!text || isChatLoading) {
+      return;
+    }
+
+    addMessage({
+      id: crypto.randomUUID(),
+      from: "user",
+      text,
+      timestamp: new Date(),
+    });
+
     setInputValue("");
     setIsTyping(true);
-    const shouldSpeakReply = voiceReplyEnabled;
 
     try {
-      const response = onSendMessage 
-        ? await onSendMessage(inputValue)
-        : { answer: "This is a demo response. Connect to the backend to get real AI responses.", isSchedulingIntent: false };
-
-      setTimeout(() => {
-        const botMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          text: response.answer,
-          isBot: true,
-          timestamp: new Date(),
-        };
-
-        setMessages((prev) => [...prev, botMessage]);
-        setIsTyping(false);
-
-        if (response.isSchedulingIntent) {
-          setShowAppointmentForm(true);
-        }
-
-        if (shouldSpeakReply) {
-          void speakResponse(botMessage.text);
-        }
-      }, 800);
+      const response = await sendMessage({ message: text });
+      await handleChatResponse(response);
     } catch (error) {
-      setIsTyping(false);
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: "I'm having trouble connecting right now. Please try again.",
-        isBot: true,
+      console.error("Chat error:", error);
+      addMessage({
+        id: crypto.randomUUID(),
+        from: "assistant",
+        text: "I'm having trouble connecting right now. Please try again in a moment.",
         timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
-    }
-  };
-
-  const speakResponse = async (text: string) => {
-    setIsGeneratingVoice(true);
-    try {
-      const res = await fetch("/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-
-      if (!res.ok) {
-        const message = (await res.text()) || res.statusText;
-        throw new Error(message);
-      }
-
-      const buffer = await res.arrayBuffer();
-      const blob = new Blob([buffer], { type: "audio/mpeg" });
-      const objectUrl = URL.createObjectURL(blob);
-
-      audioRef.current?.pause();
-      if (audioUrlRef.current) {
-        URL.revokeObjectURL(audioUrlRef.current);
-      }
-      audioUrlRef.current = objectUrl;
-
-      audioRef.current = new Audio(objectUrl);
-      audioRef.current.onended = () => {
-        if (audioUrlRef.current) {
-          URL.revokeObjectURL(audioUrlRef.current);
-          audioUrlRef.current = null;
-        }
-      };
-      await audioRef.current.play();
-    } catch (error) {
-      console.error("Voice agent error:", error);
-      setVoiceReplyEnabled(false);
-      toast({
-        title: "Voice agent unavailable",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Unable to synthesize speech. Check your ElevenLabs API key.",
-        variant: "destructive",
       });
     } finally {
-      setIsGeneratingVoice(false);
+      setIsTyping(false);
     }
   };
 
-  const handleVoiceToggle = async () => {
-    if (!voiceSupported || !recognitionRef.current) {
-      const isSecureContext = window.isSecureContext || window.location.protocol === 'https:' || window.location.hostname === 'localhost';
-      
-      toast({
-        title: "Voice Input Unavailable",
-        description: isSecureContext 
-          ? "Speech recognition is not supported in your browser. Please use Chrome, Edge, or Safari."
-          : "Voice input requires HTTPS. This feature is not available on unsecured connections.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (isRecording) {
-      try {
-        recognitionRef.current.stop();
-      } catch (error) {
-        console.error('Error stopping recognition:', error);
-        setIsRecording(false);
-      }
-      return;
-    }
-
-    // Request microphone permission first
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
-      }
-    } catch (error) {
-      console.error('Microphone permission error:', error);
-      toast({
-        title: "Microphone Access Denied",
-        description: "Please allow microphone access to use voice input. Check your browser settings.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Start speech recognition
-    try {
-      recognitionRef.current.start();
-      // isRecording will be set to true by onstart event
-    } catch (error) {
-      console.error('Error starting recognition:', error);
-      setIsRecording(false);
-      
-      toast({
-        title: "Voice Input Failed",
-        description: "Could not start voice recognition. Please try typing instead.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
-  const handleAppointmentSubmit = async (data: InsertAppointment) => {
-    try {
-      await appointmentMutation.mutateAsync(data);
-      
-      setShowAppointmentForm(false);
-      const confirmMessage: Message = {
-        id: Date.now().toString(),
-        text: `Great! I've recorded your appointment request for ${data.serviceType} at our ${data.location} location on ${data.preferredDate}. Our team will contact you shortly to confirm.`,
-        isBot: true,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, confirmMessage]);
-      
+  const handleAppointmentSuccess = (appointment?: Appointment) => {
+    setShowAppointmentForm(false);
+    addMessage({
+      id: crypto.randomUUID(),
+      from: "assistant",
+      text: appointment
+        ? `Great! I've recorded your appointment request for ${appointment.preferredDate || "the selected date"}. Our team will contact you shortly to confirm.`
+        : "Thanks! Your request has been recorded.",
+      timestamp: new Date(),
+    });
+    toast({
+      title: "Appointment request sent",
+      description: "We'll follow up soon to confirm the details.",
+    });
+  };
+
+  const handleVoiceToggle = async () => {
+    if (!voiceSupported || !recognitionRef.current) {
       toast({
-        title: "Appointment Request Submitted",
-        description: "Our team will contact you shortly to confirm.",
+        title: "Voice input unavailable",
+        description:
+          "Speech recognition requires HTTPS and a supported browser (Chrome, Edge, or Safari).",
+        variant: "destructive",
       });
+      return;
+    }
+
+    if (isRecording) {
+      recognitionRef.current.stop();
+      return;
+    }
+
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+      recognitionRef.current.start();
     } catch (error) {
-      console.error("Appointment submission error:", error);
-      
-      // Show error message in chat as well as toast
-      const errorMessage: Message = {
-        id: Date.now().toString(),
-        text: "I'm sorry, there was an error submitting your appointment request. Please try again or call your nearest Dobbs location directly.",
-        isBot: true,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
-      
+      console.error("Microphone permission error:", error);
       toast({
-        title: "Submission Failed",
-        description: "Please try again or call your nearest location.",
+        title: "Microphone access denied",
+        description: "Please allow microphone access to use voice input.",
         variant: "destructive",
       });
     }
@@ -386,7 +249,7 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
                 size="icon"
                 variant="ghost"
                 className="text-primary-foreground hover:bg-primary-foreground/10 h-8 w-8"
-                onClick={handleClose}
+                onClick={() => setIsOpen(false)}
                 data-testid="button-close-chat"
                 aria-label="Close chat"
               >
@@ -398,7 +261,7 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
           {showAppointmentForm ? (
             <div className="flex-1 overflow-y-auto p-4 bg-background">
               <AppointmentForm
-                onSubmit={handleAppointmentSubmit}
+                onSuccess={(appointment) => handleAppointmentSuccess(appointment)}
                 onCancel={() => setShowAppointmentForm(false)}
               />
             </div>
@@ -408,19 +271,15 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
                 {messages.map((message) => (
                   <div
                     key={message.id}
-                    className={cn(
-                      "flex",
-                      message.isBot ? "justify-start" : "justify-end"
-                    )}
+                    className={cn("flex", message.from === "assistant" ? "justify-start" : "justify-end")}
                   >
                     <div
                       className={cn(
                         "max-w-[80%] rounded-2xl px-4 py-3 text-sm",
-                        message.isBot
+                        message.from === "assistant"
                           ? "bg-muted text-foreground rounded-bl-none"
-                          : "bg-primary text-primary-foreground rounded-br-none"
+                          : "bg-primary text-primary-foreground rounded-br-none",
                       )}
-                      data-testid={`message-${message.id}`}
                     >
                       {message.text}
                     </div>
@@ -431,7 +290,7 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
                   <div className="flex justify-start">
                     <div className="bg-muted rounded-2xl rounded-bl-none px-4 py-3">
                       <div className="flex gap-1">
-                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
                         <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                         <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                       </div>
@@ -464,6 +323,7 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
                     className="flex-1"
                     data-testid="input-chat-message"
                     aria-label="Chat message input"
+                    disabled={isChatLoading}
                   />
                   <Button
                     size="icon"
@@ -472,7 +332,7 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
                     data-testid="button-voice-agent"
                     aria-pressed={voiceReplyEnabled}
                     aria-label={voiceReplyEnabled ? "Disable voice replies" : "Enable voice replies"}
-                  title="Let the assistant speak answers (requires ElevenLabs API key)"
+                    title="Let the assistant speak answers (requires ElevenLabs API key)"
                   >
                     {voiceReplyEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
                   </Button>
@@ -490,11 +350,11 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
                   <Button
                     size="icon"
                     onClick={handleSend}
-                    disabled={!inputValue.trim()}
+                    disabled={!inputValue.trim() || isChatLoading}
                     data-testid="button-send-message"
                     aria-label="Send message"
                   >
-                    <Send className="w-4 h-4" />
+                    {isChatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   </Button>
                 </div>
               </div>
@@ -516,7 +376,7 @@ export default function ChatWidget({ onSendMessage }: ChatWidgetProps) {
 
       {!isOpen && (
         <button
-          onClick={handleOpen}
+          onClick={() => setIsOpen(true)}
           className="w-16 h-16 md:w-16 md:h-16 rounded-full shadow-2xl bg-primary text-primary-foreground flex items-center justify-center hover:scale-105 transition"
           data-testid="button-open-chat"
           aria-label="Open chat"

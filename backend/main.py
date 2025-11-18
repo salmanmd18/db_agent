@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -9,16 +8,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
-from .faq import detect_scheduling_intent, search_faq
-from .llm import generate_llm_response
-from .models import Appointment, ChatMessage, ChatResponse, InsertAppointment
+from .db import create_db_and_tables
+from .routes.appointments import router as appointments_router
+from .routes.chat import router as chat_router
 from .routes.tts import router as tts_router
-from .storage import AppointmentStorage
 
 settings = get_settings()
 app = FastAPI(title="Dobbs AI Service Assistant", version="2.0.0")
-storage = AppointmentStorage()
-app.include_router(tts_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,48 +25,22 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def on_startup() -> None:
+    create_db_and_tables()
+
+
+for prefix in ("/api", "/api/v1"):
+    app.include_router(chat_router, prefix=prefix)
+    app.include_router(appointments_router, prefix=prefix)
+
+app.include_router(tts_router)
+app.include_router(tts_router, prefix="/api/v1")
+
+
 @app.get("/health", tags=["system"])
 async def health() -> dict:
     return {"ok": True}
-
-
-@app.post("/api/chat", response_model=ChatResponse, tags=["chat"])
-async def handle_chat(payload: ChatMessage) -> ChatResponse:
-    faq_match = search_faq(payload.message)
-    if faq_match:
-        return ChatResponse(
-            answer=faq_match.answer,
-            isSchedulingIntent=detect_scheduling_intent(payload.message),
-        )
-
-    return await generate_llm_response(payload.message)
-
-
-@app.post(
-    "/api/appointments",
-    response_model=Appointment,
-    status_code=201,
-    tags=["appointments"],
-)
-async def create_appointment(payload: InsertAppointment) -> Appointment:
-    return await storage.create_appointment(payload)
-
-
-@app.get("/api/appointments", response_model=list[Appointment], tags=["appointments"])
-async def list_appointments() -> list[Appointment]:
-    return await storage.get_all()
-
-
-@app.get(
-    "/api/appointments/{appointment_id}",
-    response_model=Appointment,
-    tags=["appointments"],
-)
-async def get_appointment(appointment_id: str) -> Appointment:
-    appointment = await storage.get_one(appointment_id)
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-    return appointment
 
 
 dist_dir = Path("dist/public")
