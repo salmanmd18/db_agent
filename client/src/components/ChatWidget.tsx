@@ -12,13 +12,14 @@ import {
   Volume2,
   VolumeX,
   X,
+  StopCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import AppointmentForm from "./AppointmentForm";
 import { useChat } from "@/hooks/useChat";
 import { fetchTtsAudio } from "@/lib/api";
-import { playAudioFromArrayBuffer } from "@/lib/audio";
+import { playAudioFromArrayBuffer, type AudioController } from "@/lib/audio";
 import type { Appointment, ChatResponse } from "@/types/api";
 
 type Message = {
@@ -45,10 +46,13 @@ export default function ChatWidget() {
   const [isTyping, setIsTyping] = useState(false);
   const [showAppointmentForm, setShowAppointmentForm] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
-  const [voiceReplyEnabled, setVoiceReplyEnabled] = useState(false);
+  const [voiceReplyEnabled, setVoiceReplyEnabled] = useState(true);
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+
   const recognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const currentAudioRef = useRef<AudioController | null>(null);
   const { toast } = useToast();
   const { sendMessage, isLoading: isChatLoading } = useChat();
 
@@ -83,22 +87,61 @@ export default function ChatWidget() {
     recognition.interimResults = false;
     recognition.lang = "en-US";
 
-    recognition.onstart = () => setIsRecording(true);
-    recognition.onend = () => setIsRecording(false);
-    recognition.onresult = (event) => {
+    recognition.onstart = () => {
+      console.log("Speech recognition started");
+      setIsRecording(true);
+    };
+    recognition.onend = () => {
+      console.log("Speech recognition ended");
+      setIsRecording(false);
+    };
+    recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
+      console.log("Speech recognition result:", transcript);
       setInputValue(transcript);
       setIsRecording(false);
     };
-    recognition.onerror = () => setIsRecording(false);
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      setIsRecording(false);
+      if (event.error === "not-allowed") {
+        toast({
+          title: "Microphone access denied",
+          description: "Please check your browser permissions.",
+          variant: "destructive",
+        });
+      } else if (event.error === "no-speech") {
+        // Often happens if no speech is detected quickly
+        toast({
+          title: "No speech detected",
+          description: "Please try again.",
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "Voice input error",
+          description: `Error: ${event.error}`,
+          variant: "destructive",
+        });
+      }
+    };
 
     recognitionRef.current = recognition;
     setVoiceSupported(true);
 
     return () => {
       recognition.stop();
+      stopAudio();
     };
   }, []);
+
+  const stopAudio = () => {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.stop();
+      currentAudioRef.current = null;
+    }
+    setIsPlayingAudio(false);
+  };
 
   const handleChatResponse = async (response: ChatResponse) => {
     const assistantText =
@@ -118,9 +161,19 @@ export default function ChatWidget() {
 
     if (voiceReplyEnabled && response.should_speak !== false) {
       setIsGeneratingVoice(true);
+      // Stop any currently playing audio before starting new one
+      stopAudio();
+
       try {
         const buffer = await fetchTtsAudio({ text: assistantText });
-        await playAudioFromArrayBuffer(buffer);
+        const controller = await playAudioFromArrayBuffer(buffer);
+        currentAudioRef.current = controller;
+        setIsPlayingAudio(true);
+
+        controller.audio.onended = () => {
+          setIsPlayingAudio(false);
+          currentAudioRef.current = null;
+        };
       } catch (error) {
         console.error("Voice agent error:", error);
         toast({
@@ -128,6 +181,7 @@ export default function ChatWidget() {
           description: "Unable to synthesize speech. Audio playback was skipped.",
           variant: "destructive",
         });
+        setIsPlayingAudio(false);
       } finally {
         setIsGeneratingVoice(false);
       }
@@ -139,6 +193,9 @@ export default function ChatWidget() {
     if (!text || isChatLoading) {
       return;
     }
+
+    // Stop audio when user sends a message
+    stopAudio();
 
     addMessage({
       id: crypto.randomUUID(),
@@ -200,6 +257,9 @@ export default function ChatWidget() {
       return;
     }
 
+    // Stop any playing audio when starting to record
+    stopAudio();
+
     if (isRecording) {
       recognitionRef.current.stop();
       return;
@@ -221,24 +281,28 @@ export default function ChatWidget() {
   };
 
   return (
-    <div className="fixed bottom-0 right-0 md:bottom-6 md:right-6 z-50 flex flex-col items-end gap-3">
+    <div className="fixed bottom-0 right-0 md:bottom-6 md:right-6 z-50 flex flex-col items-end gap-3 font-sans">
       {isOpen && !isMinimized && (
-        <Card className="chat-widget-panel flex flex-col shadow-2xl overflow-hidden border border-border/70 w-screen h-screen rounded-none md:w-[380px] md:h-[600px] md:rounded-3xl">
-          <div className="bg-primary h-16 flex items-center justify-between px-4 flex-shrink-0">
+        <Card className="chat-widget-panel flex flex-col shadow-2xl overflow-hidden border border-white/20 w-screen h-screen rounded-none md:w-[380px] md:h-[600px] md:rounded-3xl backdrop-blur-md bg-background/95 dark:bg-slate-900/90 transition-all duration-300 animate-in slide-in-from-bottom-10 fade-in">
+          {/* Header */}
+          <div className="bg-primary/90 backdrop-blur-sm h-16 flex items-center justify-between px-4 flex-shrink-0 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="w-2 h-2 bg-green-400 rounded-full" />
+              <div className="relative">
+                <div className="w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse" />
+                <div className="absolute inset-0 w-2.5 h-2.5 bg-green-400 rounded-full animate-ping opacity-75" />
+              </div>
               <div>
-                <h3 className="text-primary-foreground font-semibold text-base" data-testid="text-chat-title">
+                <h3 className="text-primary-foreground font-bold text-base tracking-tight" data-testid="text-chat-title">
                   Dobbs Assistant
                 </h3>
-                <p className="text-primary-foreground/80 text-xs">Online</p>
+                <p className="text-primary-foreground/80 text-[10px] uppercase tracking-wider font-medium">Online</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               <Button
                 size="icon"
                 variant="ghost"
-                className="text-primary-foreground hover:bg-primary-foreground/10 h-8 w-8"
+                className="text-primary-foreground hover:bg-white/10 h-8 w-8 rounded-full transition-colors"
                 onClick={() => setIsMinimized(true)}
                 data-testid="button-minimize-chat"
                 aria-label="Minimize chat"
@@ -248,7 +312,7 @@ export default function ChatWidget() {
               <Button
                 size="icon"
                 variant="ghost"
-                className="text-primary-foreground hover:bg-primary-foreground/10 h-8 w-8"
+                className="text-primary-foreground hover:bg-white/10 h-8 w-8 rounded-full transition-colors"
                 onClick={() => setIsOpen(false)}
                 data-testid="button-close-chat"
                 aria-label="Close chat"
@@ -258,8 +322,9 @@ export default function ChatWidget() {
             </div>
           </div>
 
+          {/* Content Area */}
           {showAppointmentForm ? (
-            <div className="flex-1 overflow-y-auto p-4 bg-background">
+            <div className="flex-1 overflow-y-auto p-4 bg-background/50">
               <AppointmentForm
                 onSuccess={(appointment) => handleAppointmentSuccess(appointment)}
                 onCancel={() => setShowAppointmentForm(false)}
@@ -267,18 +332,18 @@ export default function ChatWidget() {
             </div>
           ) : (
             <>
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-background">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-transparent to-black/5">
                 {messages.map((message) => (
                   <div
                     key={message.id}
-                    className={cn("flex", message.from === "assistant" ? "justify-start" : "justify-end")}
+                    className={cn("flex w-full", message.from === "assistant" ? "justify-start" : "justify-end")}
                   >
                     <div
                       className={cn(
-                        "max-w-[80%] rounded-2xl px-4 py-3 text-sm",
+                        "max-w-[85%] rounded-2xl px-4 py-3 text-sm shadow-sm leading-relaxed",
                         message.from === "assistant"
-                          ? "bg-muted text-foreground rounded-bl-none"
-                          : "bg-primary text-primary-foreground rounded-br-none",
+                          ? "bg-white dark:bg-slate-800 text-foreground rounded-bl-none border border-border/50"
+                          : "bg-primary text-primary-foreground rounded-br-none shadow-md",
                       )}
                     >
                       {message.text}
@@ -288,11 +353,11 @@ export default function ChatWidget() {
 
                 {isTyping && (
                   <div className="flex justify-start">
-                    <div className="bg-muted rounded-2xl rounded-bl-none px-4 py-3">
-                      <div className="flex gap-1">
-                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
-                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                    <div className="bg-white dark:bg-slate-800 border border-border/50 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm">
+                      <div className="flex gap-1.5">
+                        <div className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce" />
+                        <div className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <div className="w-1.5 h-1.5 bg-muted-foreground/60 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                       </div>
                     </div>
                   </div>
@@ -301,61 +366,93 @@ export default function ChatWidget() {
                 <div ref={messagesEndRef} />
               </div>
 
-              <div className="border-t bg-background p-3 flex-shrink-0">
-                {isRecording && (
-                  <div className="mb-2 text-sm text-muted-foreground flex items-center gap-2">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
-                    Listening...
+              {/* Input Area */}
+              <div className="border-t border-border/40 bg-background/80 backdrop-blur-md p-3 flex-shrink-0 space-y-3">
+                {/* Status Indicators */}
+                <div className="flex items-center justify-between min-h-[20px]">
+                  <div className="flex items-center gap-2">
+                    {isRecording && (
+                      <div className="text-xs font-medium text-red-500 flex items-center gap-2 animate-pulse">
+                        <div className="w-2 h-2 bg-red-500 rounded-full" />
+                        Listening...
+                      </div>
+                    )}
+                    {isGeneratingVoice && (
+                      <div className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Generating voice...
+                      </div>
+                    )}
+                    {isPlayingAudio && (
+                      <div className="text-xs font-medium text-primary flex items-center gap-2">
+                        <Volume2 className="w-3 h-3 animate-pulse" />
+                        Speaking...
+                      </div>
+                    )}
                   </div>
-                )}
-                {isGeneratingVoice && (
-                  <div className="mb-2 text-xs text-muted-foreground flex items-center gap-2">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Preparing voice reply...
+
+                  {isPlayingAudio && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={stopAudio}
+                      className="h-6 px-2 text-xs hover:bg-destructive/10 hover:text-destructive transition-colors"
+                    >
+                      <StopCircle className="w-3 h-3 mr-1" />
+                      Stop
+                    </Button>
+                  )}
+                </div>
+
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1 relative">
+                    <Input
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyPress={handleKeyPress}
+                      placeholder="Type your message..."
+                      className="pr-10 bg-secondary/50 border-transparent focus:border-primary/30 focus:bg-background transition-all duration-200"
+                      data-testid="input-chat-message"
+                      aria-label="Chat message input"
+                      disabled={isChatLoading}
+                    />
                   </div>
-                )}
-                <div className="flex gap-2">
-                  <Input
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    placeholder="Type your message..."
-                    className="flex-1"
-                    data-testid="input-chat-message"
-                    aria-label="Chat message input"
-                    disabled={isChatLoading}
-                  />
-                  <Button
-                    size="icon"
-                    variant={voiceReplyEnabled ? "default" : "outline"}
-                    onClick={() => setVoiceReplyEnabled((prev) => !prev)}
-                    data-testid="button-voice-agent"
-                    aria-pressed={voiceReplyEnabled}
-                    aria-label={voiceReplyEnabled ? "Disable voice replies" : "Enable voice replies"}
-                    title="Let the assistant speak answers (requires ElevenLabs API key)"
-                  >
-                    {voiceReplyEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant={isRecording ? "destructive" : "secondary"}
-                    onClick={handleVoiceToggle}
-                    disabled={!voiceSupported}
-                    data-testid="button-voice"
-                    aria-label={isRecording ? "Stop recording" : "Start voice input"}
-                    title={!voiceSupported ? "Voice input not available in this browser or connection" : undefined}
-                  >
-                    {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  </Button>
-                  <Button
-                    size="icon"
-                    onClick={handleSend}
-                    disabled={!inputValue.trim() || isChatLoading}
-                    data-testid="button-send-message"
-                    aria-label="Send message"
-                  >
-                    {isChatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  </Button>
+
+                  <div className="flex gap-1">
+                    <Button
+                      size="icon"
+                      variant={voiceReplyEnabled ? "default" : "ghost"}
+                      onClick={() => setVoiceReplyEnabled((prev) => !prev)}
+                      className={cn("transition-all duration-200", !voiceReplyEnabled && "text-muted-foreground hover:text-foreground")}
+                      data-testid="button-voice-agent"
+                      aria-pressed={voiceReplyEnabled}
+                      aria-label={voiceReplyEnabled ? "Disable voice replies" : "Enable voice replies"}
+                      title="Voice replies"
+                    >
+                      {voiceReplyEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant={isRecording ? "destructive" : "secondary"}
+                      onClick={handleVoiceToggle}
+                      disabled={!voiceSupported}
+                      className={cn("transition-all duration-200", isRecording && "animate-pulse shadow-lg shadow-red-500/20")}
+                      data-testid="button-voice"
+                      aria-label={isRecording ? "Stop recording" : "Start voice input"}
+                    >
+                      {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                    </Button>
+                    <Button
+                      size="icon"
+                      onClick={handleSend}
+                      disabled={!inputValue.trim() || isChatLoading}
+                      className="bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20 transition-all duration-200"
+                      data-testid="button-send-message"
+                      aria-label="Send message"
+                    >
+                      {isChatLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </>
@@ -366,7 +463,7 @@ export default function ChatWidget() {
       {isMinimized && (
         <Button
           onClick={() => setIsMinimized(false)}
-          className="w-14 h-14 md:w-16 md:h-16 rounded-full shadow-2xl"
+          className="w-14 h-14 md:w-16 md:h-16 rounded-full shadow-2xl hover:scale-110 transition-all duration-300 bg-primary text-primary-foreground"
           data-testid="button-restore-chat"
           aria-label="Restore chat"
         >
@@ -377,11 +474,11 @@ export default function ChatWidget() {
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="w-16 h-16 md:w-16 md:h-16 rounded-full shadow-2xl bg-primary text-primary-foreground flex items-center justify-center hover:scale-105 transition"
+          className="group w-14 h-14 md:w-16 md:h-16 rounded-full shadow-2xl bg-primary text-primary-foreground flex items-center justify-center hover:scale-110 transition-all duration-300 hover:shadow-primary/50"
           data-testid="button-open-chat"
           aria-label="Open chat"
         >
-          <MessageCircle className="w-7 h-7 md:w-8 md:h-8" />
+          <MessageCircle className="w-7 h-7 md:w-8 md:h-8 group-hover:rotate-12 transition-transform duration-300" />
         </button>
       )}
     </div>

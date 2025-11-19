@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import List
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 DEFAULT_ELEVEN_VOICE_ID = "YOUR_DEFAULT_VOICE_ID_HERE"
 
 

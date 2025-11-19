@@ -31,13 +31,13 @@ export async function apiRequest<T>(
     ...mergeHeaders(options.headers),
   };
 
-  const response = await ensureOk(
-    fetch(path, {
-      credentials: "include",
-      ...options,
-      headers,
-    }),
-  );
+  const rawResponse = await fetch(path, {
+    credentials: "include",
+    ...options,
+    headers,
+  });
+
+  const response = await ensureOk(rawResponse);
 
   if (response.status === 204) {
     return undefined as T;
@@ -63,15 +63,15 @@ export async function createAppointment(
 }
 
 export async function fetchTtsAudio(payload: TTSRequest): Promise<ArrayBuffer> {
-  const response = await ensureOk(
-    fetch("/tts", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }),
-  );
+  const rawResponse = await fetch("/tts", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const response = await ensureOk(rawResponse);
 
   return response.arrayBuffer();
 }
